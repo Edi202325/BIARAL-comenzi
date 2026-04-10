@@ -3,7 +3,6 @@ import pandas as pd
 import os
 import re
 from datetime import datetime, timedelta
-import xml.etree.ElementTree as ET
 from fpdf import FPDF
 import gspread
 from google.oauth2.service_account import Credentials
@@ -116,12 +115,12 @@ TAB_ARHIVA_PRODUSE = 'Arhiva_Produse'
 TAB_ARHIVA_COMENZI = 'Arhiva_Comenzi'
 TAB_DRAFT = 'Cos_Salvat' 
 
-COLOANE_PRODUSE = ['Cod SAGA', 'Nume Produs', 'TVA', 'UM', 'Pret Unitar', 'Pret Vanzare', 'In Stoc']
+COLOANE_PRODUSE = ['Nume Produs', 'TVA', 'UM', 'Pret Unitar', 'Pret Vanzare', 'In Stoc']
 
 PAROLA_ADMIN = "@elena2105" 
 PAROLA_BIROU = "Dorianabirou"
 
-# Configurăm clienții în loc de magazine
+# Configurăm clienții
 CREDENTIALE_CLIENTI = {
     f"Client {i}": f"c{i}" for i in range(1, 11)
 }
@@ -130,7 +129,7 @@ CIF_CLIENTI = {
     f"Client {i}": f"RO0000{i:02d}" for i in range(1, 11)
 }
 
-# Poți actualiza datele firmei BIARAL mai jos
+# Datele firmei BIARAL
 FIRMA_NUME = "BIARAL SRL"
 FIRMA_CIF = "RO00000000"
 FIRMA_RC = "J00/000/0000"
@@ -183,9 +182,6 @@ def get_data(tab_name, columns):
         headers = data_bruta[0]
         rows = data_bruta[1:]
         df = pd.DataFrame(rows, columns=headers)
-        
-        if 'Cod SAGA' in df.columns:
-            df['Cod SAGA'] = df['Cod SAGA'].astype(str).str.replace(r'\.0$', '', regex=True)
 
         for col in columns:
             if col not in df.columns:
@@ -223,9 +219,6 @@ def save_data(df, tab_name):
             worksheet = sheet.add_worksheet(title=tab_name, rows=1000, cols=20)
             
         df_clean = df.copy()
-        
-        if 'Cod SAGA' in df_clean.columns:
-            df_clean['Cod SAGA'] = df_clean['Cod SAGA'].astype(str).str.replace(r'\.0$', '', regex=True)
 
         if 'Pret Unitar' in df_clean.columns:
             df_clean['Pret Unitar'] = pd.to_numeric(df_clean['Pret Unitar'], errors='coerce').fillna(0.0).map(lambda x: f"{x:.2f}")
@@ -269,9 +262,6 @@ def append_data(df_nou, tab_name):
                 worksheet.update(values=[df_nou.columns.tolist()], range_name="A1", value_input_option='RAW')
             
         df_clean = df_nou.copy()
-        
-        if 'Cod SAGA' in df_clean.columns:
-            df_clean['Cod SAGA'] = df_clean['Cod SAGA'].astype(str).str.replace(r'\.0$', '', regex=True)
 
         if 'Pret Unitar' in df_clean.columns:
             df_clean['Pret Unitar'] = pd.to_numeric(df_clean['Pret Unitar'], errors='coerce').fillna(0.0).map(lambda x: f"{x:.2f}")
@@ -302,11 +292,8 @@ def curata_preturi_import(df):
         elif c_low in ['nume produs', 'produs', 'denumire']: col_map[col] = 'Nume Produs'
         elif c_low in ['tva', 'categorie', 'taxa']: col_map[col] = 'TVA'
         elif c_low in ['um', 'unitate']: col_map[col] = 'UM'
-        elif c_low in ['cod', 'cod saga', 'cod articol', 'id']: col_map[col] = 'Cod SAGA'
     
     df = df.rename(columns=col_map)
-    if 'Cod SAGA' in df.columns:
-        df['Cod SAGA'] = df['Cod SAGA'].astype(str).str.replace(r'\.0$', '', regex=True)
 
     cols = ['Pret Unitar', 'Pret Vanzare']
     for col in cols:
@@ -380,102 +367,6 @@ def cycle_sort(col_name):
         if current_dir == 'asc': st.session_state.sort_state['dir'] = 'desc'
         elif current_dir == 'desc': st.session_state.sort_state = {'col': None, 'dir': None}
         else: st.session_state.sort_state = {'col': col_name, 'dir': 'asc'}
-
-# --- GENERATOR XML PENTRU SAGA ---
-def genereaza_xml_saga(df_comenzi_export, df_produse_baza):
-    root = ET.Element("Facturi")
-    
-    for _, r in df_comenzi_export.iterrows():
-        factura = ET.SubElement(root, "Factura")
-        antet = ET.SubElement(factura, "Antet")
-        
-        client_nume = str(r['Client'])
-        cif_client = CIF_CLIENTI.get(client_nume, "") 
-        
-        ET.SubElement(antet, "FurnizorNume").text = FIRMA_NUME
-        ET.SubElement(antet, "FurnizorCIF").text = FIRMA_CIF 
-        ET.SubElement(antet, "ClientNume").text = client_nume
-        ET.SubElement(antet, "ClientCIF").text = cif_client 
-        
-        try:
-            nr_comanda_safe = int(float(r['Nr Comanda']))
-        except:
-            nr_comanda_safe = 0
-            
-        ET.SubElement(antet, "Numar").text = str(nr_comanda_safe)
-        
-        try:
-            data_raw = str(r['Data']).split(' ')[0]
-            data_f = datetime.strptime(data_raw, "%d.%m.%Y").strftime("%d.%m.%Y")
-        except:
-            data_f = str(r['Data'])
-            
-        ET.SubElement(antet, "Data").text = data_f
-        ET.SubElement(antet, "Scadenta").text = data_f
-        ET.SubElement(antet, "Tip").text = "A" # A = Aviz
-        
-        detalii = ET.SubElement(factura, "Detalii")
-        
-        lista_produse = parseaza_text_in_tabel(r['Detalii Comanda'], df_produse_baza)
-        
-        for item in lista_produse:
-            nume_p_db = item['Produs']
-            
-            try:
-                cant_p_introdusa = float(str(item['Cantitate']).replace(',', '.').strip())
-            except ValueError:
-                cant_p_introdusa = 0.0
-            
-            match = re.search(r'(\d+)\s*/\s*[a-zA-Z]+', nume_p_db)
-            
-            cant_p_finala = cant_p_introdusa
-            nume_p_afisat = nume_p_db
-
-            if match:
-                multiplicator = int(match.group(1))
-                cant_p_finala = cant_p_introdusa * multiplicator
-                nume_p_afisat = nume_p_db[:match.start()].strip()
-            
-            nume_cautat = str(nume_p_db).strip().lower()
-            match_db = df_produse_baza[df_produse_baza['Nume Produs'].astype(str).str.strip().str.lower() == nume_cautat]
-            
-            raw_cod = str(match_db.iloc[0]['Cod SAGA']) if not match_db.empty and 'Cod SAGA' in match_db.columns else ""
-            cod_saga = raw_cod.split('.')[0].zfill(8) if raw_cod != "" else ""
-            
-            pu = str(match_db.iloc[0]['Pret Vanzare']) if not match_db.empty else "0.00"
-            tva = str(match_db.iloc[0]['TVA']).replace('%', '') if not match_db.empty else "11"
-            um = str(match_db.iloc[0]['UM']) if not match_db.empty else "BUC"
-            if um.lower() == 'nan': um = "BUC"
-            
-            try:
-                pu_float = float(pu)
-                cant_float = float(cant_p_finala)
-                tva_float = float(tva)
-                
-                valoare = cant_float * pu_float
-                valoare_tva = valoare * (tva_float / 100.0)
-            except ValueError:
-                pu_float = 0.0
-                cant_float = float(cant_p_finala)
-                valoare = 0.0
-                tva_float = 11.0
-                valoare_tva = 0.0
-            
-            linie = ET.SubElement(detalii, "Linie")
-            
-            ET.SubElement(linie, "Tip").text = "Articol"
-            ET.SubElement(linie, "Cod").text = cod_saga 
-            ET.SubElement(linie, "Denumire").text = nume_p_afisat
-            ET.SubElement(linie, "UM").text = um
-            ET.SubElement(linie, "Cantitate").text = f"{cant_float:.3f}"
-            ET.SubElement(linie, "Pret").text = f"{pu_float:.4f}"
-            ET.SubElement(linie, "Valoare").text = f"{valoare:.2f}"
-            ET.SubElement(linie, "CotaTVA").text = f"{tva_float:.0f}"
-            ET.SubElement(linie, "TVA").text = f"{valoare_tva:.2f}"
-            
-    xml_bytes = ET.tostring(root, encoding='windows-1250', xml_declaration=True)
-    xml_str = xml_bytes.decode('windows-1250').replace("'", '"')
-    return xml_str.encode('windows-1250')
 
 # --- PDF GENERATOR ---
 def genereaza_pdf_aviz(data_comenzii, nume_client, produse_lista, id_comanda, df_inv):
@@ -975,7 +866,7 @@ elif mod == "🔒 Panou Admin":
         
         with t1:
             with st.expander("📤 Import listă (Excel/salvat .csv)"):
-                st.info("💡 **Format Coloane Excel: Cod SAGA, Nume Produs, TVA, UM, Pret Unitar, Pret Vanzare.**")
+                st.info("💡 **Format Coloane Excel: Nume Produs, TVA, UM, Pret Unitar, Pret Vanzare.**")
                 up = st.file_uploader("", type=['csv', 'xlsx', 'xls']) 
                 
                 if up is not None:
@@ -997,10 +888,9 @@ elif mod == "🔒 Panou Admin":
             
             st.markdown("##### ➕ Produs Nou/Actualizare pret")
             with st.form("form_produs_nou"):
-                c1, c2, c3 = st.columns([1, 2, 1])
-                cod_s = c1.text_input("Cod SAGA (ID)")
-                p_n = c2.text_input("Nume Produs")
-                t_n = c3.selectbox("TVA", ["11%", "21%"])
+                c1, c2 = st.columns([2, 1])
+                p_n = c1.text_input("Nume Produs")
+                t_n = c2.selectbox("TVA", ["11%", "21%"])
                 
                 c4, c5, c6 = st.columns(3)
                 um_n = c4.selectbox("UM (Unitate Măsură)", ["", "BUC", "PET", "KG", "BAX"])
@@ -1010,7 +900,7 @@ elif mod == "🔒 Panou Admin":
                 if st.form_submit_button("Salvează Produs"):
                     if p_n.strip() != "":
                         df_produse = df_produse[df_produse['Nume Produs'] != p_n]
-                        df_nou = pd.DataFrame({'Cod SAGA': [cod_s], 'TVA':[t_n], 'Nume Produs':[p_n], 'UM':[um_n], 'Pret Unitar':[p_u],'Pret Vanzare':[p_v], 'In Stoc': ['DA']})
+                        df_nou = pd.DataFrame({'TVA':[t_n], 'Nume Produs':[p_n], 'UM':[um_n], 'Pret Unitar':[p_u],'Pret Vanzare':[p_v], 'In Stoc': ['DA']})
                         df_produse = pd.concat([df_produse, df_nou])
                         df_produse = df_produse[[c for c in COLOANE_PRODUSE if c in df_produse.columns]]
                         if save_data(df_produse, TAB_PRODUSE): st.rerun()
@@ -1022,9 +912,6 @@ elif mod == "🔒 Panou Admin":
             df_disp_prod = df_produse.copy()
             if cautare_admin_produse:
                 df_disp_prod = df_disp_prod[df_disp_prod['Nume Produs'].str.contains(cautare_admin_produse, case=False, na=False)]
-            
-            if 'Cod SAGA' in df_disp_prod.columns:
-                df_disp_prod['Cod SAGA'] = df_disp_prod['Cod SAGA'].astype(str).str.replace(r'\.0$', '', regex=True)
 
             df_disp_prod['Pret Unitar'] = pd.to_numeric(df_disp_prod['Pret Unitar'], errors='coerce').fillna(0.0).map(lambda x: f"{x:.2f}")
             df_disp_prod['Pret Vanzare'] = pd.to_numeric(df_disp_prod['Pret Vanzare'], errors='coerce').fillna(0.0).map(lambda x: f"{x:.2f}")
@@ -1086,10 +973,7 @@ elif mod == "🔒 Panou Admin":
         with t2:
             st.markdown('<div id="top-admin-comenzi" style="position:relative; top:-50px;"></div>', unsafe_allow_html=True)
             
-            st.subheader("🗂️ Gestionare Comenzi & Export SAGA")
-            
-            st.markdown("#### 🚀 Exportă pentru Contabilitate")
-            st.info("Generează un fișier XML compatibil SAGA pentru toate comenzile afișate mai jos.")
+            st.subheader("🗂️ Gestionare Comenzi")
             
             cautare_admin = st.text_input("🔍 Caută / Filtrează comanda (Client, Număr, Data, Produse)...", key="search_admin")
             
@@ -1106,20 +990,6 @@ elif mod == "🔒 Panou Admin":
                     df_afisare['Detalii Comanda'].astype(str).str.contains(term_a, case=False) |
                     df_afisare['Client'].astype(str).str.contains(term_a, case=False)
                 ]
-
-            try:
-                xml_saga_data = genereaza_xml_saga(df_afisare, df_produse)
-                st.download_button(
-                    label="📥 Descarcă XML pentru SAGA", 
-                    data=xml_saga_data, 
-                    file_name="Facturi.xml", 
-                    mime="application/xml",
-                    type="primary"
-                )
-            except Exception as e:
-                st.error(f"Eroare la generarea fișierului XML: {e}")
-            
-            st.divider()
             
             if df_afisare.empty:
                 st.success("Tabelul este curat. Nu există nicio comandă plasată momentan.")
@@ -1225,7 +1095,6 @@ elif mod == "🔒 Panou Admin":
                     time.sleep(2)
                     st.rerun()
                     
-            # Adaugă HTML-ul pentru meniul plutitor din partea stângă la sfârșitul tab-ului Comenzi
             st.markdown('''
                 <div class="floating-menu-left">
                     <a href="#zona-stergere-comenzi" class="float-btn">🗑️ Ștergere</a>
