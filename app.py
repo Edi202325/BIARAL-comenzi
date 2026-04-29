@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 import time
 
 # --- 1. CONFIGURARE PAGINĂ ---
-st.set_page_config(page_title="Aplicatie Comenzi BIARAL", layout="wide", page_icon="🛒")
+st.set_page_config(page_title="Aplicatie Comenzi", layout="wide", page_icon="🛒")
 
 # --- CSS COMPLET ---
 st.markdown("""
@@ -133,9 +133,9 @@ CIF_CLIENTI = {
 FIRMA_NUME = "BIARAL SRL"
 FIRMA_CIF = "RO00000000"
 FIRMA_RC = "J00/000/0000"
-FIRMA_ADRESA = "Adresa firmei BIARAL"
+FIRMA_ADRESA = "Adresa firmei "
 FIRMA_CAPITAL = "200 RON"
-FIRMA_CONTACT = "Tel.0000000000  Email: contact@biaral.ro"
+FIRMA_CONTACT = "Tel.0000000000  Email: contact@.ro"
 FIRMA_BANCA = "BANCA"
 FIRMA_IBAN = "RO00BANK0000000000000000"
 
